@@ -15,6 +15,9 @@ class CephOps(Config):
         self.client = SshUtil(self.ceph_adm_node,
                               self.ceph_adm_user,
                               self.ceph_adm_password)
+        self.igw = SshUtil(list(self.gateways.keys())[0],
+                              list(self.gateways.values())[0][0],
+                              list(self.gateways.values())[0][1])
         self.utl = Utils(label="Waiting for {} ({}s)".format(self.ceph_health_is_ok_with,
                                                              self.wait_for_health_ok_t))
         self.down_osds = self.get_down_osds()
@@ -38,6 +41,10 @@ class CephOps(Config):
         else:
             log.info("Health is not ok")
         return False
+
+    def enable_autoreclaim(self):
+        log.debug("Enabling Autoreclaim on the cluster")
+        stdout, _ = self.igw.run_cmd('targetcli ls')
 
     def set_noup(self):
         log.debug("Setting NoUp")

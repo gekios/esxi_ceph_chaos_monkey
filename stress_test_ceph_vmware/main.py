@@ -41,10 +41,11 @@ class Runner(Config):
         """
         log.info("Perfoming intial availability check for hosts.")
         state = True
-        for gateway in self.gateways:
+#        for gateway in self.gateways:
+        for gateway, gwcreds in self.gateways.items():
             ssh_ = SshUtil(gateway,
-                           self.gateway_user,
-                           self.gateway_password)
+                           gwcreds[0],
+                           gwcreds[1])
             try:
                 log.debug("Checking gateway {} for availability".format(gateway))
                 ssh_.run_cmd('ls')
@@ -95,12 +96,15 @@ class Runner(Config):
         log.debug("Checking thresholds")
         if len(self.ops.vms) < self.max_vms:
             # Spawn until threshold is fulfilled again
-            while len(self.ops.vms) < self.max_vms:
+            while (len(self.ops.vms)  + len(self.ops.vms_creating)) < self.max_vms:
                 log.info(Fore.YELLOW + "VM count dropped below the configured threshold. Filling up")
                 self.ops.clone_vm()
-
+        for ds_name  in self.ds_names:
+            if not self.ops.has_datastore_space(ds_name):
+                log.info(Fore.RED + "No space in the datastore. Test is done. Cleaning up the VMs...")
+                self.teardown()
         if len(self.ops.vms) > self.max_vms:
-            while len(self.ops.vms) > self.max_vms:
+            while (len(self.ops.vms) + len(self.ops.vms_creating)) > self.max_vms:
                 log.info(Fore.YELLOW + "VM count rose over the configured threshold. Removing VMs")
                 self.destroy_vms(count=1)
 
@@ -126,9 +130,9 @@ class Runner(Config):
         # move that to the config
         files = ['/var/log/vmkernel.log']
         timestamp = time.time()
-        for host in self.esxi_hosts:
+        for host, creds in self.esxi_hosts.items():
             log.info("Collecting logs from {}".format(host))
-            ssh = SshUtil(host, self.user, self.password)
+            ssh = SshUtil(host, creds[0], creds[1])
             for fn in files:
                 log.info("Collecting {}".format(fn))
                 save_name = fn.replace('/', '_')
@@ -139,9 +143,9 @@ class Runner(Config):
         # move that to the config
         files = ['/var/log/messages']
         timestamp = time.time()
-        for host in self.gateways:
+        for host, creds in self.gateways.items():
             log.info("Collecting logs from {}".format(host))
-            ssh = SshUtil(host, self.gateway_user, self.gateway_password)
+            ssh = SshUtil(host, creds[0], creds[1])
             for fn in files:
                 log.info("Collecting {}".format(fn))
                 save_name = fn.replace('/', '_')
@@ -150,34 +154,40 @@ class Runner(Config):
     def teardown(self):
         self.copy_vmware_logs()
         self.copy_gateway_logs()
+        if self.teardown_vms:
+            log.info("Cleaning all the VMs that were created by ESXi Chaos Monkey™")
+            for vm in self.ops.vms:
+                self.destroy_vms(count=len(self.ops.vms))
 
     def stress_test(self):
         self.startup()
         abort = False
+        timeout = time.time() + self.total_time*60
+        log.info("Program will terminate after {}  minute(s)".format( self.total_time))
         while not abort:
             self.ops.queue.wait_for_any_finished_task()
             self.print_header()
             self.check_thresholds()
             seed = random.randrange(0,500)
-            log.debug("seed: {}".format(seed))
+            log.info("seed: {}".format(seed))
             if seed in range(0,99):
                 self.ops.clone_vm()
 
-            if seed in range(100,199):
+            elif seed in range(100,199):
                 self.destroy_vms(count=1)
 
-            if seed in range(200,299):
+            elif seed in range(200,299):
                 self.ops.clone_vm()
 
-            if seed in range(300,320):
+            elif seed in range(300,320):
                 gateway = self.ops.random_gateway()
-                SshUtil(gateway, self.gateway_user, self.gateway_password, self.reboot_allowed).reboot()
+#                SshUtil(gateway, self.gateways[gateway][0], self.gateways[gateway][1], self.reboot_allowed).reboot()
 
-            if seed in range(321,399):
+            elif seed in range(321,399):
                 random_osd = self.cephops.random_osd()
-                self.cephops.mark_osd(random_osd, 'out')
+#                self.cephops.mark_osd(random_osd, 'out')
 
-            if seed in range(400,500):
+            elif seed in range(400,500):
                 log.info(Fore.RED + "Placeholder .. What to do more?")
 
             if not self.cephops.wait_for_health_ok(silent=False):
@@ -188,7 +198,10 @@ class Runner(Config):
                 log.info(Fore.RED + "Health of VMWARE is not ok, aborting")
                 abort = True
             self.print_footer()
-            
+            if self.total_time == 0 or time.time() >= timeout:
+                log.info("Time is up. Terminating")
+                abort = True
+                self.ops.queue.cancel_all_tasks()
         if abort:
             self.teardown()
 

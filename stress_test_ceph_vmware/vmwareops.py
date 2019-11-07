@@ -11,10 +11,10 @@ class VMwareOps(Config):
         Config.__init__(self)
 
     def clients(self):
-        for node in self.esxi_hosts:
-            yield SshUtil(self.host,
-                          self.user,
-                          self.password)
+        for node, creds in self.esxi_hosts.items():
+            yield SshUtil(node,
+                          creds[0],
+                          creds[1])
 
     def health_ok(self):
         """ Not sure if that makes sense
