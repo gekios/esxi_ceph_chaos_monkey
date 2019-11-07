@@ -27,8 +27,11 @@ class Queue(Config):
         return self.tasks.pop(0) if self.tasks else None
 
     def cancel_all_tasks(self):
-        for task in self.tasks:
-            self.cancel_task(task)
+        if len(self.tasks)>0:
+                log.info("Canceling all tasks that are in Queue")
+                for task in self.tasks:
+                    if task.info.cancelable == True and not task.info.cancelled == True:
+                        self.cancel_task(task)
 
     def cancel_task(self, task):
         task.CancelTask()
@@ -43,7 +46,7 @@ class Queue(Config):
         self.clean_finished_tasks()
         log.info('{}Pushing task {} to queue{}'.format(Fore.GREEN, task, Style.RESET_ALL))
         log.debug("Tasks in queue: {}".format(self.task_count))
-        if self.task_count < self.max_tasks:
+        if self.task_count < self.max_tasks and self.max_tasks>0:
             self.tasks.append(task)
         else:
             info = "(Running in {} mode)".format(self.mode)
@@ -58,7 +61,9 @@ class Queue(Config):
         return len(self.tasks)
 
     def wait_for_any_finished_task(self):
-        while self.task_count >= self.max_tasks:
+        log.info("wait current tasks count is: {}".format(self.task_count))   
+        log.info("wait max tasks count is: {}".format(self.max_tasks))   
+        while self.task_count >= self.max_tasks and self.max_tasks>0:
             self.utl.spinner()
             self.clean_finished_tasks(silent=True)
 
@@ -82,6 +87,9 @@ class Queue(Config):
 
     def wait_for_task(self, task):
         """ wait for a vCenter task to finish """
+        log.info("Entered wait_for_task".format(Fore.BLUE))
+#        if self.task_count == 0:
+#            return
         task_done = False
         while not task_done:
             self.utl.spinner()

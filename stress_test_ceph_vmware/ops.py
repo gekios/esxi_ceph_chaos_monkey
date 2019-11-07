@@ -19,6 +19,8 @@ class Ops(Config):
         self.queue = Queue()
         self.content = self.si.RetrieveContent()
         self.vms = []
+        self.vms_deleting = []
+        self.vms_creating = []
         self.MAX_DEPTH = 10
         self.migration_between_hosts = self.migration_possible(self.esxi_hosts)
         self.migration_between_datasources = self.migration_possible(self.ds_names)
@@ -35,10 +37,10 @@ class Ops(Config):
         return random.choice(self.ds_names)
 
     def random_gateway(self):
-        return random.choice(self.gateways)
+        return random.choice(list(self.gateways.keys()))
 
     def random_host(self):
-        return random.choice(self.esxi_hosts)
+        return random.choice(list(self.esxi_hosts.keys()))
 
     @property
     def powered_on_vms(self):
@@ -102,7 +104,16 @@ class Ops(Config):
         except:
             logging.debug("Vm is already gone or does not exist yet.")
             return False
-        if name.startswith(filter_) and not name == self.template_vm_name and not self.has_deletion_task(vm) and not self.has_clone_task(vm) and not vm in self.vms and vm.summary.runtime.host:
+        if name.startswith(filter_) and not name == self.template_vm_name and not vm in self.vms_deleting and not vm in self.vms_creating and not vm in self.vms:
+            # Don't add if still creating
+            if self.has_deletion_task(vm):
+                self.vms_deleting.append(vm)
+            if self.has_clone_task(vm):
+                self.vms_creating.append(vm)
+            elif vm.summary.runtime.host:
+                self.vms.append(vm)
+#        if name.startswith(filter_) and not name == self.template_vm_name and not vm in self.vms: 
+        #and not self.has_deletion_task(vm) and not self.has_clone_task(vm) and not vm in self.vms and vm.summary.runtime.host:
             # Don't add if still creating
             self.vms.append(vm)
 
@@ -142,27 +153,45 @@ class Ops(Config):
         template = self.get_obj([vim.VirtualMachine], self.template_vm_name)
         destfolder = datacenter.vmFolder
 
+
         # any of .datastores. Currently only checking for [0]
         if template.datastore[0].summary.name != ds_name:
             log.info(Fore.CYAN+ "Detected a migration between datastores")
 
         if template.summary.runtime.host.name != host_name:
             log.info(Fore.CYAN+ "Detected a migration between hosts")
+        
+#        log.info("Current free space on {} is {}GB".format(ds_name, datastore.summary.freeSpace/1024/1024/1024))
+#        log.info("Disk size for VMs is {}GB".format(template.summary.storage.committed/1024/1024/1024))
+#        log.info("RAM size for VMs is {}GB".format(template.summary.config.memorySizeMB/1024))
+#        total_vm_space = template.summary.storage.committed + template.summary.config.memorySizeMB*1024*1024
 
-        relospec = vim.vm.RelocateSpec()
-        relospec.datastore = datastore
-        relospec.pool = resource_pool
-        relospec.host = host
+#        if datastore.summary.freeSpace >= total_vm_space:
+        if self.has_datastore_space(ds_name):
+            relospec = vim.vm.RelocateSpec()
+            relospec.datastore = datastore
+            relospec.pool = resource_pool
+            relospec.host = host
 
-        clonespec = vim.vm.CloneSpec()
-        clonespec.location = relospec
-        clonespec.powerOn = power_on
+            clonespec = vim.vm.CloneSpec()
+            clonespec.location = relospec
+            clonespec.powerOn = power_on
 
-        log.info(Style.BRIGHT + "Cloning...")
+            log.info(Style.BRIGHT + "Cloning...")
 
-        task = template.Clone(folder=destfolder, name=vm_name, spec=clonespec)
-        self.queue.push_task(task)
-        self.get_vm_list()
+            task = template.Clone(folder=destfolder, name=vm_name, spec=clonespec)
+            self.queue.push_task(task)
+            self.get_vm_list()
+            log.info("Current VMs are : {}".format(self.vms))
+            log.info("Current VMs getting created are : {}".format(self.vms_creating))
+            log.info("Current VMs to be deleted are : {}".format(self.vms_deleting))
+        else:
+            log.info("There is not enough space on datastore {} to create a VM".format(ds_name))
+            self.queue.clean_finished_tasks(silent=True)
+            self.queue.cancel_all_tasks()
+#        for vm in self.vms:
+#            log.info("VM name: {}".format(vm.summary.config.name))
+        
 
 
     def overall_tasks(self, silent=True):
@@ -202,12 +231,13 @@ class Ops(Config):
     def has_clone_task(self, vm):
         prev_tasks, next_tasks = self.get_task_history(vm)
         for task in next_tasks:
-            if vm.summary.config.name == task.entityName and task.descriptionId == 'VirtualMachine.destroy':
+            if vm.summary.config.name == task.entityName and task.descriptionId == 'VirtualMachine.clone':
                 logging.debug("Detected a clone task for VM {}".format(vm))
                 return True
 
     def destroy_vm(self, vm):
         if isinstance(vm, str):
+            log.info("{} is instance of STR".format(vm))
             vm = self.get_obj([vim.VirtualMachine], vm)
         try:
             vm_name = vm.name
@@ -217,6 +247,7 @@ class Ops(Config):
             self.vms.remove(vm)
             return False
         if vm.runtime.powerState == "poweredOn":
+            print("Attempting to power off {0}".format(vm_name))
             self.queue.push_task(vm.PowerOffVM_Task())
         self.queue.push_task(vm.Destroy_Task())
         self.vms.remove(vm)
@@ -246,4 +277,11 @@ class Ops(Config):
         task = vmfolder.CreateVM_Task(config=config, pool=resource_pool)
         self.queue.push_task(task)
 
+    def has_datastore_space(self, ds_name):
+        datacenter = self.get_obj([vim.Datacenter], self.dc_name)
+        datastore = self.get_obj([vim.Datastore], ds_name)
+        template = self.get_obj([vim.VirtualMachine], self.template_vm_name)
+        total_vm_space = template.summary.storage.committed + template.summary.config.memorySizeMB*1024*1024
+        if datastore.summary.freeSpace >= total_vm_space:
+            return True
 

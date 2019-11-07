@@ -7,30 +7,37 @@ LOG_LEVEL_CONSOLE: 'info'
 LOG_LEVEL_FILE: 'debug'
 LOG_LEVEL: 'info'
 LOG_FILE_PATH: 'chaos.log'
+total_time: 2
+teardown_vms: True
 
 # vshpere 
-host: "10.162.186.115"
-user: "root"
-password: "replace_me"
+vcenter_host: "x.qa.suse.cz"
+vcenter_user: "administrator@vsphere.local"
+vcenter_password: "O!dHacker5"
 dc_name: "Datacenter"
-cluster_name: "Openstack"
-esxi_hosts: ["10.162.186.111"]
-template_vm_name: "ceph_template_vm"
+cluster_name: "clusteroony"
+esxi_hosts: {"kratos.qa.suse.cz": ['root', 'O!dHacker5'],
+             "momus.qa.suse.cz": ['root', 'O!dHacker5'],
+             "zelus.qa.suse.cz": ['root', 'O!dHacker5']
+            }
+template_vm_name: "windows_template"
 
 # Ceph Admin
-ceph_adm_node: "blueshark1.arch.suse.de"
+ceph_adm_node: "hornet.qam.suse.cz"
 ceph_adm_user: "root"
-ceph_adm_password: "replace_me"
+ceph_adm_password: "susetesting"
 
 # Gateways
-gateways: ['blueshark2.arch.suse.de']
-gateway_user: "root"
-gateway_password: "replace_me"
-ds_names: ["iscsi_testing_1", "iscsi_testing_2"]
+gateways: {"bee.qam.suse.cz": ["root", "susetesting"],
+           "fly.qam.suse.cz": ["root", "susetesting"]
+          }
+#gateway_user: "root"
+#gateway_password: "susetesting"
+ds_names: ["cephtest1", "cephtest2"]
 
 # General settings
 filter_string: "ceph_"
-max_vms: 6
+max_vms: 4
 max_tasks: 10
 wait_for_health_ok_t: 360
 force_reboot: False

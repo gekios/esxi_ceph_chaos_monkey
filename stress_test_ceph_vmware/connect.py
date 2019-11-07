@@ -8,8 +8,8 @@ class Connect(Config):
         Config.__init__(self)
 
         try:
-            self.si = SmartConnectNoSSL(host=self.host,
-                                       user=self.user,
-                                       pwd=self.password)
+            self.si = SmartConnectNoSSL(host=self.vcenter_host,
+                                       user=self.vcenter_user,
+                                       pwd=self.vcenter_password)
         except vim.fault.InvalidLogin:
             raise SystemExit("Unable to connect to host with supplied credentials.")
